@@ -84,6 +84,33 @@ const resumeHeadlineText2 =
       );
     }
 
+    const loginErrorText = await page.evaluate(() => {
+      const selectors = [
+        ".err",
+        ".error",
+        ".server-err",
+        "#usernameField + .err",
+        "#passwordField + .err"
+      ];
+
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        const text = (el?.textContent || "").trim();
+        if (text) {
+          return text;
+        }
+      }
+
+      return "";
+    });
+
+    if (loginErrorText) {
+      await page.screenshot({ path: "login-invalid-credentials.png", fullPage: true });
+      throw new Error(
+        `Login failed with server message: ${loginErrorText}. Check login-invalid-credentials.png.`
+      );
+    }
+
     // 📄 PROFILE PAGE
     console.log("📄 Navigating to profile...");
     await page.goto("https://www.naukri.com/mnjuser/profile", {
@@ -95,8 +122,19 @@ const resumeHeadlineText2 =
 
     if (page.url().includes("/nlogin/login")) {
       await page.screenshot({ path: "profile-redirected-to-login.png", fullPage: true });
+      fs.writeFileSync("profile-redirected-to-login.html", await page.content(), "utf8");
+
+      const bodyText = await page.evaluate(() => (document.body?.innerText || "").toLowerCase());
+      const challengeDetected =
+        bodyText.includes("captcha") ||
+        bodyText.includes("verify") ||
+        bodyText.includes("unusual") ||
+        bodyText.includes("challenge");
+
       throw new Error(
-        "Profile page redirected to login in CI. Check profile-redirected-to-login.png for challenge/session issues."
+        challengeDetected
+          ? "Profile redirected to login due possible captcha/challenge in CI. Check profile-redirected-to-login.png and profile-redirected-to-login.html."
+          : "Profile redirected to login in CI. Possible causes: wrong credentials, expired session, or risk check. Check profile-redirected-to-login.png and profile-redirected-to-login.html."
       );
     }
 
