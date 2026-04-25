@@ -57,10 +57,31 @@ const resumeHeadlineText2 =
     await page.click("#passwordField", { clickCount: 3 });
     await page.type("#passwordField", process.env.NAUKRI_PASSWORD, { delay: 50 });
 
-    await Promise.all([
-      page.click("button[type='submit']"),
-      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 })
+    await page.click("button[type='submit']");
+
+    // In headless CI, login may not trigger a full navigation immediately.
+    // Wait for either URL change or disappearance of login fields.
+    const loginStateReached = await Promise.race([
+      page
+        .waitForFunction(
+          () => !location.href.includes("/nlogin/login"),
+          { timeout: 60000 }
+        )
+        .then(() => true)
+        .catch(() => false),
+      page
+        .waitForSelector("#usernameField", { hidden: true, timeout: 60000 })
+        .then(() => true)
+        .catch(() => false)
     ]);
+
+    if (!loginStateReached) {
+      const currentUrl = page.url();
+      await page.screenshot({ path: "login-stuck.png", fullPage: true });
+      throw new Error(
+        `Login did not complete in time. Current URL: ${currentUrl}. Check login-stuck.png for captcha/challenge.`
+      );
+    }
 
     // 📄 PROFILE PAGE
     console.log("📄 Navigating to profile...");
