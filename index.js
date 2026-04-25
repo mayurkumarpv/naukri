@@ -1,20 +1,45 @@
 const puppeteer = require("puppeteer");
 
 const resumeHeadlineText =
-  "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, Python, SQL.";
+  "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, SQL.";
 
 const resumeHeadlineText2 =
-  "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, Python, SQL";
+  "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, SQL";
 
 (async () => {
   console.log("🚀 Starting script...");
 
+  if (!process.env.NAUKRI_EMAIL || !process.env.NAUKRI_PASSWORD) {
+    throw new Error(
+      "Missing NAUKRI_EMAIL or NAUKRI_PASSWORD environment variables"
+    );
+  }
+
   const browser = await puppeteer.launch({
-    headless: "new", // IMPORTANT for GitHub Actions
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--window-size=1366,768"
+    ]
   });
 
   const page = await browser.newPage();
+
+  await page.setViewport({ width: 1366, height: 768 });
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+  );
+  await page.setExtraHTTPHeaders({ "accept-language": "en-US,en;q=0.9" });
+
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+    Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4] });
+    globalThis.chrome = { runtime: {} };
+  });
 
   try {
     // 🔐 LOGIN
@@ -24,12 +49,17 @@ const resumeHeadlineText2 =
     });
 
     console.log("🔐 Logging in...");
+    await page.waitForSelector("#usernameField", { timeout: 15000 });
+    await page.click("#usernameField", { clickCount: 3 });
     await page.type("#usernameField", process.env.NAUKRI_EMAIL, { delay: 50 });
+
+    await page.waitForSelector("#passwordField", { timeout: 15000 });
+    await page.click("#passwordField", { clickCount: 3 });
     await page.type("#passwordField", process.env.NAUKRI_PASSWORD, { delay: 50 });
 
     await Promise.all([
       page.click("button[type='submit']"),
-      page.waitForNavigation({ waitUntil: "networkidle2" })
+      page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 })
     ]);
 
     // 📄 PROFILE PAGE
@@ -40,10 +70,16 @@ const resumeHeadlineText2 =
 
     // ✏️ EDIT HEADLINE
     console.log("✏️ Opening headline editor...");
-    await page.waitForSelector("#lazyResumeHead", { timeout: 10000 });
+    await page.waitForSelector("#lazyResumeHead .edit", {
+      timeout: 20000,
+      visible: true
+    });
     await page.click("#lazyResumeHead .edit");
 
-    await page.waitForSelector("#resumeHeadline", { timeout: 10000 });
+    await page.waitForSelector("#resumeHeadline", {
+      timeout: 20000,
+      visible: true
+    });
 
     const resumeHeadline = await page.$("#resumeHeadline");
 
@@ -71,10 +107,34 @@ const resumeHeadlineText2 =
 
     // 💾 SAVE
     console.log("💾 Saving profile...");
-    await page.click("button[type='submit']");
+    const saveSelector = "form[name='resumeHeadlineForm'] button[type='submit']";
+    await page.waitForSelector(saveSelector, {
+      timeout: 20000,
+      visible: true
+    });
+    await page.$eval(saveSelector, el => {
+      el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    });
+
+    const saveButton = await page.$(saveSelector);
+    if (!saveButton) {
+      throw new Error("Save button not found in resume headline modal");
+    }
+
+    try {
+      await saveButton.click();
+    } catch {
+      await page.evaluate(selector => {
+        const el = document.querySelector(selector);
+        if (!el) {
+          throw new Error("Save button missing during fallback click");
+        }
+        el.click();
+      }, saveSelector);
+    }
 
     // wait for save to complete
-    await page.waitForTimeout(3000);
+    await new Promise(r => setTimeout(r, 3000));
 
     // 📸 Debug screenshot (VERY useful for GitHub)
     await page.screenshot({ path: "result.png" });
