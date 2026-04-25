@@ -1,4 +1,5 @@
 const puppeteer = require("puppeteer");
+const fs = require("node:fs");
 
 const resumeHeadlineText =
   "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, SQL.";
@@ -86,19 +87,75 @@ const resumeHeadlineText2 =
     // 📄 PROFILE PAGE
     console.log("📄 Navigating to profile...");
     await page.goto("https://www.naukri.com/mnjuser/profile", {
-      waitUntil: "networkidle2"
+      waitUntil: "domcontentloaded"
     });
+
+    // Give dynamic widgets time to hydrate in CI/headless.
+    await new Promise(r => setTimeout(r, 4000));
+
+    if (page.url().includes("/nlogin/login")) {
+      await page.screenshot({ path: "profile-redirected-to-login.png", fullPage: true });
+      throw new Error(
+        "Profile page redirected to login in CI. Check profile-redirected-to-login.png for challenge/session issues."
+      );
+    }
+
+    const clickResumeHeadlineEdit = async () => {
+      const directHandle = await page.$("#lazyResumeHead .edit");
+      if (directHandle) {
+        await directHandle.evaluate(el => {
+          el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        });
+        await directHandle.click();
+        return true;
+      }
+
+      const clickedFromTitle = await page.evaluate(() => {
+        const titles = Array.from(document.querySelectorAll(".widgetTitle"));
+        const title = titles.find(el =>
+          (el.textContent || "").trim().toLowerCase() === "resume headline"
+        );
+        if (!title) {
+          return false;
+        }
+
+        const widgetHead = title.closest(".widgetHead");
+        const editBtn = widgetHead?.querySelector(".edit");
+        if (!editBtn) {
+          return false;
+        }
+
+        editBtn.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        editBtn.click();
+        return true;
+      });
+
+      return clickedFromTitle;
+    };
 
     // ✏️ EDIT HEADLINE
     console.log("✏️ Opening headline editor...");
-    await page.waitForSelector("#lazyResumeHead .edit", {
-      timeout: 20000,
-      visible: true
-    });
-    await page.click("#lazyResumeHead .edit");
+    let editOpened = false;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      editOpened = await clickResumeHeadlineEdit();
+      if (editOpened) {
+        break;
+      }
+
+      await page.evaluate(y => window.scrollBy(0, y), 300);
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    if (!editOpened) {
+      await page.screenshot({ path: "resume-edit-not-found.png", fullPage: true });
+      fs.writeFileSync("resume-edit-not-found.html", await page.content(), "utf8");
+      throw new Error(
+        "Resume headline edit control not found. Check resume-edit-not-found.png and resume-edit-not-found.html"
+      );
+    }
 
     await page.waitForSelector("#resumeHeadline", {
-      timeout: 20000,
+      timeout: 30000,
       visible: true
     });
 
