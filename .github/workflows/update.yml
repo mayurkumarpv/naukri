@@ -28,3 +28,12 @@ jobs:
         env:
           NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
           NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
+
+      - name: 📤 Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: naukri-debug-screenshots
+          path: |
+            *.png
+          if-no-files-found: ignore
