@@ -36,4 +36,5 @@ jobs:
           name: naukri-debug-screenshots
           path: |
             *.png
+            *.html
           if-no-files-found: ignore
