@@ -9,7 +9,7 @@ on:
 
 jobs:
   run-script:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: 📥 Checkout repo
@@ -28,6 +28,7 @@ jobs:
         env:
           NAUKRI_EMAIL: ${{ secrets.NAUKRI_EMAIL }}
           NAUKRI_PASSWORD: ${{ secrets.NAUKRI_PASSWORD }}
+          NAUKRI_COOKIES_JSON: ${{ secrets.NAUKRI_COOKIES_JSON }}
 
       - name: 📤 Upload debug screenshots
         if: always()
