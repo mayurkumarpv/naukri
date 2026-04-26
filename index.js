@@ -7,6 +7,35 @@ const resumeHeadlineText =
 const resumeHeadlineText2 =
   "Result driven professional having deep expertise in Frontend Development, Software Development Life Cycle, User Experience Design, Data Visualization, Agile Methodology, Code Quality Assurance, JavaScript, TypeScript, Material UI, Node.js, SQL";
 
+const profileUrl = "https://www.naukri.com/mnjuser/profile";
+const userDataDir = process.env.PUPPETEER_USER_DATA_DIR || ".puppeteer-profile";
+const headlessMode = process.env.PUPPETEER_HEADLESS || "new";
+
+const isOnLoginPage = url => url.includes("/nlogin/login");
+
+const tryLoginWithCookies = async page => {
+  if (!process.env.NAUKRI_COOKIES_JSON) {
+    return false;
+  }
+
+  let cookies;
+  try {
+    cookies = JSON.parse(process.env.NAUKRI_COOKIES_JSON);
+  } catch {
+    throw new Error("NAUKRI_COOKIES_JSON is not valid JSON");
+  }
+
+  if (!Array.isArray(cookies) || cookies.length === 0) {
+    throw new Error("NAUKRI_COOKIES_JSON must be a non-empty cookie array");
+  }
+
+  await page.setCookie(...cookies);
+  await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
+  await new Promise(r => setTimeout(r, 3000));
+
+  return !isOnLoginPage(page.url());
+};
+
 (async () => {
   console.log("🚀 Starting script...");
 
@@ -17,7 +46,8 @@ const resumeHeadlineText2 =
   }
 
   const browser = await puppeteer.launch({
-    headless: "new",
+    headless: headlessMode === "false" ? false : headlessMode,
+    userDataDir,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -25,6 +55,9 @@ const resumeHeadlineText2 =
       "--window-size=1366,768"
     ]
   });
+
+  console.log(`🗂️ Using Chrome profile: ${userDataDir}`);
+  console.log(`🧭 Headless mode: ${headlessMode}`);
 
   const page = await browser.newPage();
 
@@ -43,77 +76,96 @@ const resumeHeadlineText2 =
   });
 
   try {
-    // 🔐 LOGIN
-    console.log("🌐 Opening login page...");
-    await page.goto("https://www.naukri.com/nlogin/login", {
-      waitUntil: "networkidle2"
-    });
+    let loggedIn = false;
 
-    console.log("🔐 Logging in...");
-    await page.waitForSelector("#usernameField", { timeout: 15000 });
-    await page.click("#usernameField", { clickCount: 3 });
-    await page.type("#usernameField", process.env.NAUKRI_EMAIL, { delay: 50 });
+    // First preference for CI: use an existing authenticated cookie jar.
+    loggedIn = await tryLoginWithCookies(page);
 
-    await page.waitForSelector("#passwordField", { timeout: 15000 });
-    await page.click("#passwordField", { clickCount: 3 });
-    await page.type("#passwordField", process.env.NAUKRI_PASSWORD, { delay: 50 });
-
-    await page.click("button[type='submit']");
-
-    // In headless CI, login may not trigger a full navigation immediately.
-    // Wait for either URL change or disappearance of login fields.
-    const loginStateReached = await Promise.race([
-      page
-        .waitForFunction(
-          () => !location.href.includes("/nlogin/login"),
-          { timeout: 60000 }
-        )
-        .then(() => true)
-        .catch(() => false),
-      page
-        .waitForSelector("#usernameField", { hidden: true, timeout: 60000 })
-        .then(() => true)
-        .catch(() => false)
-    ]);
-
-    if (!loginStateReached) {
-      const currentUrl = page.url();
-      await page.screenshot({ path: "login-stuck.png", fullPage: true });
-      throw new Error(
-        `Login did not complete in time. Current URL: ${currentUrl}. Check login-stuck.png for captcha/challenge.`
-      );
+    if (loggedIn) {
+      console.log("✅ Logged in using NAUKRI_COOKIES_JSON session");
     }
 
-    const loginErrorText = await page.evaluate(() => {
-      const selectors = [
-        ".err",
-        ".error",
-        ".server-err",
-        "#usernameField + .err",
-        "#passwordField + .err"
-      ];
-
-      for (const selector of selectors) {
-        const el = document.querySelector(selector);
-        const text = (el?.textContent || "").trim();
-        if (text) {
-          return text;
-        }
+    // 🔐 LOGIN
+    if (!loggedIn) {
+      if (process.env.CI) {
+        throw new Error(
+          "Cookie-based login failed or no NAUKRI_COOKIES_JSON provided. " +
+          "Credential login is blocked by OTP in CI. " +
+          "Please update NAUKRI_COOKIES_JSON in GitHub Secrets."
+        );
       }
 
-      return "";
-    });
+      console.log("🌐 Opening login page...");
+      await page.goto("https://www.naukri.com/nlogin/login", {
+        waitUntil: "networkidle2"
+      });
 
-    if (loginErrorText) {
-      await page.screenshot({ path: "login-invalid-credentials.png", fullPage: true });
-      throw new Error(
-        `Login failed with server message: ${loginErrorText}. Check login-invalid-credentials.png.`
-      );
+      console.log("🔐 Logging in...");
+      await page.waitForSelector("#usernameField", { timeout: 15000 });
+      await page.click("#usernameField", { clickCount: 3 });
+      await page.type("#usernameField", process.env.NAUKRI_EMAIL, { delay: 50 });
+
+      await page.waitForSelector("#passwordField", { timeout: 15000 });
+      await page.click("#passwordField", { clickCount: 3 });
+      await page.type("#passwordField", process.env.NAUKRI_PASSWORD, { delay: 50 });
+
+      await page.click("button[type='submit']");
+
+      // In headless CI, login may not trigger a full navigation immediately.
+      // Wait for either URL change or disappearance of login fields.
+      const loginStateReached = await Promise.race([
+        page
+          .waitForFunction(
+            () => !location.href.includes("/nlogin/login"),
+            { timeout: 60000 }
+          )
+          .then(() => true)
+          .catch(() => false),
+        page
+          .waitForSelector("#usernameField", { hidden: true, timeout: 60000 })
+          .then(() => true)
+          .catch(() => false)
+      ]);
+
+      if (!loginStateReached) {
+        const currentUrl = page.url();
+        await page.screenshot({ path: "login-stuck.png", fullPage: true });
+        throw new Error(
+          `Login did not complete in time. Current URL: ${currentUrl}. Check login-stuck.png for captcha/challenge.`
+        );
+      }
+
+      const loginErrorText = await page.evaluate(() => {
+        const selectors = [
+          ".err",
+          ".error",
+          ".server-err",
+          "#usernameField + .err",
+          "#passwordField + .err"
+        ];
+
+        for (const selector of selectors) {
+          const el = document.querySelector(selector);
+          const text = (el?.textContent || "").trim();
+          if (text) {
+            return text;
+          }
+        }
+
+        return "";
+      });
+
+      if (loginErrorText) {
+        await page.screenshot({ path: "login-invalid-credentials.png", fullPage: true });
+        throw new Error(
+          `Login failed with server message: ${loginErrorText}. Check login-invalid-credentials.png.`
+        );
+      }
     }
 
     // 📄 PROFILE PAGE
     console.log("📄 Navigating to profile...");
-    await page.goto("https://www.naukri.com/mnjuser/profile", {
+    await page.goto(profileUrl, {
       waitUntil: "domcontentloaded"
     });
 
@@ -125,7 +177,9 @@ const resumeHeadlineText2 =
       fs.writeFileSync("profile-redirected-to-login.html", await page.content(), "utf8");
 
       const bodyText = await page.evaluate(() => (document.body?.innerText || "").toLowerCase());
+      const hasRecaptcha = await page.$(".g-recaptcha") !== null;
       const challengeDetected =
+        hasRecaptcha ||
         bodyText.includes("captcha") ||
         bodyText.includes("verify") ||
         bodyText.includes("unusual") ||
@@ -133,7 +187,7 @@ const resumeHeadlineText2 =
 
       throw new Error(
         challengeDetected
-          ? "Profile redirected to login due possible captcha/challenge in CI. Check profile-redirected-to-login.png and profile-redirected-to-login.html."
+          ? "Profile redirected to login due possible captcha/challenge in CI. Check profile-redirected-to-login.png and profile-redirected-to-login.html. Consider using NAUKRI_COOKIES_JSON in GitHub Secrets."
           : "Profile redirected to login in CI. Possible causes: wrong credentials, expired session, or risk check. Check profile-redirected-to-login.png and profile-redirected-to-login.html."
       );
     }
